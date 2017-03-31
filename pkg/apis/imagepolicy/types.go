@@ -63,4 +63,9 @@ type ImageReviewStatus struct {
 	// may contain a short description of what is wrong.  Kubernetes
 	// may truncate excessively long errors when displaying to the user.
 	Reason string
+	// Array of image rewrites for admission controller to carry out.
+	// Array is nil if no re-writes are to be done
+	// Else, the list should be equal to len(ImageReviewSpec.Containers)
+	// each entry containing the rewrites of each ContainerSpec in presented order.
+	ContainerRewrites []ImageReviewContainerSpec
 }

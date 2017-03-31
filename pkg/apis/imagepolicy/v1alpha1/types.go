@@ -70,4 +70,11 @@ type ImageReviewStatus struct {
 	// may truncate excessively long errors when displaying to the user.
 	// +optional
 	Reason string `json:"reason,omitempty" protobuf:"bytes,2,opt,name=reason"`
+    // Array of image rewrites for admission controller to carry out.
+	// Array is nil if no re-writes are to be done
+	// Else, the list should be equal to len(ImageReviewSpec.Containers)
+	// each entry containing the rewrites of each ContainerSpec in presented order.
+	// +optional
+	ContainerRewrites []ImageReviewContainerSpec `json:"containerRewrites,omitempty" protobuf:"bytes,3,rep,name=containerRewrites"`
+
 }
