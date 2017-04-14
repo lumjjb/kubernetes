@@ -16456,11 +16456,25 @@ func GetOpenAPIDefinitions(ref openapi.ReferenceCallback) map[string]openapi.Ope
 								Format:      "",
 							},
 						},
+						"containerRewrites": {
+							SchemaProps: spec.SchemaProps{
+								Description: "Array of image rewrites for admission controller to carry out. Array is nil if no re-writes are to be done Else, the list should be equal to len(ImageReviewSpec.Containers) each entry containing the rewrites of each ContainerSpec in presented order.",
+								Type:        []string{"array"},
+								Items: &spec.SchemaOrArray{
+									Schema: &spec.Schema{
+										SchemaProps: spec.SchemaProps{
+											Ref: ref("k8s.io/kubernetes/pkg/apis/imagepolicy/v1alpha1.ImageReviewContainerSpec"),
+										},
+									},
+								},
+							},
+						},
 					},
 					Required: []string{"allowed"},
 				},
 			},
-			Dependencies: []string{},
+			Dependencies: []string{
+				"k8s.io/kubernetes/pkg/apis/imagepolicy/v1alpha1.ImageReviewContainerSpec"},
 		},
 		"k8s.io/kubernetes/pkg/apis/policy/v1beta1.Eviction": {
 			Schema: spec.Schema{

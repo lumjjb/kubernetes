@@ -58,9 +58,10 @@ func (ImageReviewSpec) SwaggerDoc() map[string]string {
 }
 
 var map_ImageReviewStatus = map[string]string{
-	"":        "ImageReviewStatus is the result of the token authentication request.",
-	"allowed": "Allowed indicates that all images were allowed to be run.",
-	"reason":  "Reason should be empty unless Allowed is false in which case it may contain a short description of what is wrong.  Kubernetes may truncate excessively long errors when displaying to the user.",
+	"":                  "ImageReviewStatus is the result of the token authentication request.",
+	"allowed":           "Allowed indicates that all images were allowed to be run.",
+	"reason":            "Reason should be empty unless Allowed is false in which case it may contain a short description of what is wrong.  Kubernetes may truncate excessively long errors when displaying to the user.",
+	"containerRewrites": "Array of image rewrites for admission controller to carry out. Array is nil if no re-writes are to be done Else, the list should be equal to len(ImageReviewSpec.Containers) each entry containing the rewrites of each ContainerSpec in presented order.",
 }
 
 func (ImageReviewStatus) SwaggerDoc() map[string]string {
