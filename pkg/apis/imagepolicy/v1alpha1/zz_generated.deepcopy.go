@@ -56,6 +56,9 @@ func DeepCopy_v1alpha1_ImageReview(in interface{}, out interface{}, c *conversio
 		if err := DeepCopy_v1alpha1_ImageReviewSpec(&in.Spec, &out.Spec, c); err != nil {
 			return err
 		}
+		if err := DeepCopy_v1alpha1_ImageReviewStatus(&in.Status, &out.Status, c); err != nil {
+			return err
+		}
 		return nil
 	}
 }
@@ -98,6 +101,11 @@ func DeepCopy_v1alpha1_ImageReviewStatus(in interface{}, out interface{}, c *con
 		in := in.(*ImageReviewStatus)
 		out := out.(*ImageReviewStatus)
 		*out = *in
+		if in.ContainerRewrites != nil {
+			in, out := &in.ContainerRewrites, &out.ContainerRewrites
+			*out = make([]ImageReviewContainerSpec, len(*in))
+			copy(*out, *in)
+		}
 		return nil
 	}
 }

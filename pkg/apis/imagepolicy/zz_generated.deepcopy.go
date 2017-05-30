@@ -56,6 +56,9 @@ func DeepCopy_imagepolicy_ImageReview(in interface{}, out interface{}, c *conver
 		if err := DeepCopy_imagepolicy_ImageReviewSpec(&in.Spec, &out.Spec, c); err != nil {
 			return err
 		}
+		if err := DeepCopy_imagepolicy_ImageReviewStatus(&in.Status, &out.Status, c); err != nil {
+			return err
+		}
 		return nil
 	}
 }
@@ -98,6 +101,11 @@ func DeepCopy_imagepolicy_ImageReviewStatus(in interface{}, out interface{}, c *
 		in := in.(*ImageReviewStatus)
 		out := out.(*ImageReviewStatus)
 		*out = *in
+		if in.ContainerRewrites != nil {
+			in, out := &in.ContainerRewrites, &out.ContainerRewrites
+			*out = make([]ImageReviewContainerSpec, len(*in))
+			copy(*out, *in)
+		}
 		return nil
 	}
 }
