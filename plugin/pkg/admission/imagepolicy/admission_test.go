@@ -296,6 +296,7 @@ func NewTestServer(s Service, cert, key, caCert []byte) (*httptest.Server, error
 		type status struct {
 			Allowed bool   `json:"allowed"`
 			Reason  string `json:"reason"`
+            ContainerRewrites []v1alpha1.ImageReviewContainerSpec `json:"containerRewrites"`
 		}
 		resp := struct {
 			APIVersion string `json:"apiVersion"`
@@ -304,7 +305,7 @@ func NewTestServer(s Service, cert, key, caCert []byte) (*httptest.Server, error
 		}{
 			APIVersion: v1alpha1.SchemeGroupVersion.String(),
 			Kind:       "ImageReview",
-			Status:     status{review.Status.Allowed, review.Status.Reason},
+			Status:     status{review.Status.Allowed, review.Status.Reason, review.Status.ContainerRewrites},
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
@@ -334,6 +335,13 @@ func (m *mockService) Review(r *v1alpha1.ImageReview) {
 		if c.Image == "bad" {
 			r.Status.Allowed = false
 		}
+	}
+	
+    r.Status.ContainerRewrites = make([]v1alpha1.ImageReviewContainerSpec, len(r.Spec.Containers))
+    for i, c := range r.Spec.Containers {
+		if c.Image == "image_rewrite" {
+            r.Status.ContainerRewrites[i].Image = "image_rewritten"
+        }
 	}
 
 	if !r.Status.Allowed {
@@ -941,5 +949,507 @@ func goodPod(containerID string) *api.Pod {
 				},
 			},
 		},
+	}
+}
+
+
+func TestImageRewriting(t *testing.T) {
+	tests := []struct {
+		test                 string
+		pod                  *api.Pod
+        // Pod to test the caching mechanism
+		pod_cache            *api.Pod
+		wantAllowed, wantErr bool
+		initContainerRewrites map[int]bool
+		containerRewrites     map[int]bool
+	}{
+        {
+			test:        "Single container rewrite",
+			pod:         goodPod("image_rewrite"),
+			pod_cache:   goodPod("image_rewrite"),
+			wantAllowed: true,
+            containerRewrites: map[int]bool{0 : true},
+		},
+		{
+			test: "One good container, one rewrite",
+			pod: &api.Pod{
+				Spec: api.PodSpec{
+					ServiceAccountName: "default",
+					SecurityContext:    &api.PodSecurityContext{},
+					Containers: []api.Container{
+						{
+							Image:           "good",
+							SecurityContext: &api.SecurityContext{},
+						},
+						{
+							Image:           "image_rewrite",
+							SecurityContext: &api.SecurityContext{},
+						},
+					},
+				},
+			},
+            pod_cache: &api.Pod{
+				Spec: api.PodSpec{
+					ServiceAccountName: "default",
+					SecurityContext:    &api.PodSecurityContext{},
+					Containers: []api.Container{
+						{
+							Image:           "good",
+							SecurityContext: &api.SecurityContext{},
+						},
+						{
+							Image:           "image_rewrite",
+							SecurityContext: &api.SecurityContext{},
+						},
+					},
+				},
+			},
+
+			wantAllowed: true,
+            containerRewrites: map[int]bool{1 : true},
+		},
+        {
+			test: "One rewrite, one good container",
+			pod: &api.Pod{
+				Spec: api.PodSpec{
+					ServiceAccountName: "default",
+					SecurityContext:    &api.PodSecurityContext{},
+					Containers: []api.Container{
+						{
+							Image:           "image_rewrite",
+							SecurityContext: &api.SecurityContext{},
+						},
+						{
+							Image:           "good",
+							SecurityContext: &api.SecurityContext{},
+						},
+					},
+				},
+			},
+			wantAllowed: true,
+            containerRewrites: map[int]bool{0 : true},
+		},
+
+        {
+			test: "Two rewrite containers",
+			pod: &api.Pod{
+				Spec: api.PodSpec{
+					ServiceAccountName: "default",
+					SecurityContext:    &api.PodSecurityContext{},
+					Containers: []api.Container{
+						{
+							Image:           "image_rewrite",
+							SecurityContext: &api.SecurityContext{},
+						},
+						{
+							Image:           "image_rewrite",
+							SecurityContext: &api.SecurityContext{},
+						},
+					},
+				},
+			},
+			wantAllowed: true,
+            containerRewrites: map[int]bool{0 : true, 1 : true},
+		},
+
+		{
+			test: "Multiple good containers with rewrites",
+			pod: &api.Pod{
+				Spec: api.PodSpec{
+					ServiceAccountName: "default",
+					SecurityContext:    &api.PodSecurityContext{},
+					Containers: []api.Container{
+						{
+							Image:           "good",
+							SecurityContext: &api.SecurityContext{},
+						},
+						{
+							Image:           "image_rewrite",
+							SecurityContext: &api.SecurityContext{},
+						},
+                        {
+							Image:           "good",
+							SecurityContext: &api.SecurityContext{},
+						},
+                        {
+							Image:           "image_rewrite",
+							SecurityContext: &api.SecurityContext{},
+						},
+					},
+				},
+			},
+			wantAllowed: true,
+            containerRewrites: map[int]bool{1 : true, 3 : true},
+		},
+
+		{
+			test: "Good container, rewrite init container",
+			pod: &api.Pod{
+				Spec: api.PodSpec{
+					ServiceAccountName: "default",
+					SecurityContext:    &api.PodSecurityContext{},
+					Containers: []api.Container{
+						{
+							Image:           "good",
+							SecurityContext: &api.SecurityContext{},
+						},
+					},
+					InitContainers: []api.Container{
+						{
+							Image:           "image_rewrite",
+							SecurityContext: &api.SecurityContext{},
+						},
+					},
+				},
+			},
+			wantAllowed: true,
+            initContainerRewrites: map[int]bool {0: true},
+		},
+		{
+			test: "Rewrite container, good init container",
+			pod: &api.Pod{
+				Spec: api.PodSpec{
+					ServiceAccountName: "default",
+					SecurityContext:    &api.PodSecurityContext{},
+					Containers: []api.Container{
+						{
+							Image:           "image_rewrite",
+							SecurityContext: &api.SecurityContext{},
+						},
+					},
+					InitContainers: []api.Container{
+						{
+							Image:           "good",
+							SecurityContext: &api.SecurityContext{},
+						},
+					},
+				},
+			},
+			pod_cache: &api.Pod{
+				Spec: api.PodSpec{
+					ServiceAccountName: "default",
+					SecurityContext:    &api.PodSecurityContext{},
+					Containers: []api.Container{
+						{
+							Image:           "image_rewrite",
+							SecurityContext: &api.SecurityContext{},
+						},
+					},
+					InitContainers: []api.Container{
+						{
+							Image:           "good",
+							SecurityContext: &api.SecurityContext{},
+						},
+					},
+				},
+			},
+
+			wantAllowed: true,
+            containerRewrites: map[int]bool {0: true},
+		},
+
+        {
+			test: "Bad container, rewrite init container",
+			pod: &api.Pod{
+				Spec: api.PodSpec{
+					ServiceAccountName: "default",
+					SecurityContext:    &api.PodSecurityContext{},
+					Containers: []api.Container{
+						{
+							Image:           "bad",
+							SecurityContext: &api.SecurityContext{},
+						},
+					},
+					InitContainers: []api.Container{
+						{
+							Image:           "image_rewrite",
+							SecurityContext: &api.SecurityContext{},
+						},
+					},
+				},
+			},
+			wantAllowed: false,
+			wantErr: true,
+		},
+		{
+			test: "Rewrite container, bad init container",
+			pod: &api.Pod{
+				Spec: api.PodSpec{
+					ServiceAccountName: "default",
+					SecurityContext:    &api.PodSecurityContext{},
+					Containers: []api.Container{
+						{
+							Image:           "image_rewrite",
+							SecurityContext: &api.SecurityContext{},
+						},
+					},
+					InitContainers: []api.Container{
+						{
+							Image:           "bad",
+							SecurityContext: &api.SecurityContext{},
+						},
+					},
+				},
+			},
+            wantAllowed: false,
+			wantErr: true,
+		},
+
+        {
+			test: "Rewrite container, rewrite init container",
+			pod: &api.Pod{
+				Spec: api.PodSpec{
+					ServiceAccountName: "default",
+					SecurityContext:    &api.PodSecurityContext{},
+					Containers: []api.Container{
+						{
+							Image:           "image_rewrite",
+							SecurityContext: &api.SecurityContext{},
+						},
+					},
+					InitContainers: []api.Container{
+						{
+							Image:           "image_rewrite",
+							SecurityContext: &api.SecurityContext{},
+						},
+					},
+				},
+			},
+            pod_cache: &api.Pod{
+				Spec: api.PodSpec{
+					ServiceAccountName: "default",
+					SecurityContext:    &api.PodSecurityContext{},
+					Containers: []api.Container{
+						{
+							Image:           "image_rewrite",
+							SecurityContext: &api.SecurityContext{},
+						},
+					},
+					InitContainers: []api.Container{
+						{
+							Image:           "image_rewrite",
+							SecurityContext: &api.SecurityContext{},
+						},
+					},
+				},
+			},
+
+			wantAllowed: true,
+            initContainerRewrites: map[int]bool {0: true},
+            containerRewrites: map[int]bool {0: true},
+		},
+	}
+	for _, tt := range tests {
+		// Use a closure so defer statements trigger between loop iterations.
+		func() {
+			service := new(mockService)
+            service.Allow()
+			service.statusCode = 200
+
+			server, err := NewTestServer(service, serverCert, serverKey, caCert)
+			if err != nil {
+				t.Errorf("%s: failed to create server: %v", tt.test, err)
+				return
+			}
+			defer server.Close()
+
+			wh, err := newImagePolicyWebhook(server.URL, clientCert, clientKey, caCert, 200, false)
+			if err != nil {
+				t.Errorf("%s: failed to create client: %v", tt.test, err)
+				return
+			}
+
+            origInitContainerImages := make([]string, len(tt.pod.Spec.InitContainers))
+            for i, cspec := range tt.pod.Spec.InitContainers {
+                origInitContainerImages[i] = cspec.Image
+            }
+            origContainerImages := make([]string, len(tt.pod.Spec.Containers))
+            for i, cspec := range tt.pod.Spec.Containers {
+                origContainerImages[i] = cspec.Image
+            }
+
+        
+            attr := admission.NewAttributesRecord(tt.pod, nil, api.Kind("Pod").WithVersion("version"), "namespace", "", api.Resource("pods").WithVersion("version"), "", admission.Create, &user.DefaultInfo{})
+
+            // Twice to run test for cache
+            for i:=0; i<2; i++ {
+                err = wh.Admit(attr)
+                if tt.wantAllowed {
+                    if err != nil {
+                        t.Errorf("expected successful admission: %s", tt.test)
+                    }
+
+                    pod, ok := attr.GetObject().(*api.Pod)
+                    if !ok {
+                        t.Errorf("Unable to parse pod: %s", tt.test)
+                    }
+                    
+                    // Check image rewriting
+                    for i, cspec := range pod.Spec.InitContainers {
+                        if tt.initContainerRewrites != nil &&  tt.initContainerRewrites[i] {
+                            if cspec.Image != "image_rewritten" {
+                                t.Errorf("Image not rewritten (%s): %s", tt.test, cspec.Image)
+                            } 
+                        } else if tt.initContainerRewrites == nil || !tt.initContainerRewrites[i] {
+                            if cspec.Image != origInitContainerImages[i] {
+                                t.Errorf("Not rewrite image rewritten (%s): %s", tt.test, cspec.Image)
+                            }
+                        }
+                    }
+
+                    for i, cspec := range pod.Spec.Containers {
+                        if tt.containerRewrites != nil &&  tt.containerRewrites[i] {
+                            if cspec.Image != "image_rewritten" {
+                                t.Errorf("Image not rewritten (%s): %s", tt.test, cspec.Image)
+                            } 
+                        } else  {
+                            if cspec.Image != origContainerImages[i] {
+                                t.Errorf("Not rewrite image rewritten (%s): %s", tt.test, cspec.Image)
+                            }
+                        }
+                    }
+
+                } else {
+                    if err == nil {
+                        t.Errorf("expected failed admission: %s", tt.test)
+                    }
+                }
+                if tt.wantErr {
+                    if err == nil {
+                        t.Errorf("expected error making admission request: %v", err)
+                    }
+                    return
+                }
+                if err != nil {
+                    t.Errorf("%s: failed to admit: %v", tt.test, err)
+                    return
+                }
+
+                if tt.pod_cache == nil {
+                    break
+                } else {
+                    attr = admission.NewAttributesRecord(tt.pod_cache, nil, api.Kind("Pod").WithVersion("version"), "namespace", "", api.Resource("pods").WithVersion("version"), "", admission.Create, &user.DefaultInfo{})
+                    service.Deny()
+                }
+            }
+        }()
+	}
+}
+
+
+func TestImageRewritingCache(t *testing.T) {
+	tests := []struct {
+		test                 string
+		pod, pod_cache       *api.Pod
+		wantAllowed, wantErr bool
+		initContainerRewrites map[int]bool
+		containerRewrites     map[int]bool
+	}{
+        {
+			test:        "Single container rewrite",
+			pod:         goodPod("image_rewrite"),
+			pod_cache:   goodPod("image_rewrite"),
+			wantAllowed: true,
+            containerRewrites: map[int]bool{0 : true},
+		},
+  	}
+	for _, tt := range tests {
+		// Use a closure so defer statements trigger between loop iterations.
+		func() {
+			service := new(mockService)
+            service.Allow()
+			service.statusCode = 200
+
+			server, err := NewTestServer(service, serverCert, serverKey, caCert)
+			if err != nil {
+				t.Errorf("%s: failed to create server: %v", tt.test, err)
+				return
+			}
+			defer server.Close()
+
+			wh, err := newImagePolicyWebhook(server.URL, clientCert, clientKey, caCert, 200, false)
+			if err != nil {
+				t.Errorf("%s: failed to create client: %v", tt.test, err)
+				return
+			}
+
+            origInitContainerImages := make([]string, len(tt.pod.Spec.InitContainers))
+            for i, cspec := range tt.pod.Spec.InitContainers {
+                origInitContainerImages[i] = cspec.Image
+            }
+            origContainerImages := make([]string, len(tt.pod.Spec.Containers))
+            for i, cspec := range tt.pod.Spec.Containers {
+                origContainerImages[i] = cspec.Image
+            }
+
+            attr := admission.NewAttributesRecord(tt.pod, nil, api.Kind("Pod").WithVersion("version"), "namespace", "", api.Resource("pods").WithVersion("version"), "", admission.Create, &user.DefaultInfo{})
+
+            attr_next := admission.NewAttributesRecord(tt.pod_cache, nil, api.Kind("Pod").WithVersion("version"), "namespace", "", api.Resource("pods").WithVersion("version"), "", admission.Create, &user.DefaultInfo{})
+
+            
+            for i := 0; i < 2; i++ {
+                if i==1 {
+                    if !tt.wantAllowed {
+                        break
+                    } else {
+                        attr = attr_next
+                        service.Deny()
+                    }
+                }
+
+                err = wh.Admit(attr)
+                if tt.wantAllowed {
+                    if err != nil {
+                        t.Errorf("expected successful admission: %s", tt.test)
+                    }
+
+                    pod, ok := attr.GetObject().(*api.Pod)
+                    if !ok {
+                        t.Errorf("Unable to parse pod: %s", tt.test)
+                    }
+                    
+                    // Check image rewriting
+                    for i, cspec := range pod.Spec.InitContainers {
+                        if tt.initContainerRewrites != nil &&  tt.initContainerRewrites[i] {
+                            if cspec.Image != "image_rewritten" {
+                                t.Errorf("Image not rewritten (%s): %s", tt.test, cspec.Image)
+                            } 
+                        } else if tt.initContainerRewrites == nil || !tt.initContainerRewrites[i] {
+                            if cspec.Image != origInitContainerImages[i] {
+                                t.Errorf("Not rewrite image rewritten (%s): %s", tt.test, cspec.Image)
+                            }
+                        }
+                    }
+
+                    for i, cspec := range pod.Spec.Containers {
+                        //t.Errorf("Image (%s): %s ::: %s, %s", origContainerImages[i],  cspec.Image, tt.containerRewrites, tt.containerRewrites[i])
+                        if tt.containerRewrites != nil &&  tt.containerRewrites[i] {
+                            if cspec.Image != "image_rewritten" {
+                                t.Errorf("Image not rewritten (%s): %s", tt.test, cspec.Image)
+                            } 
+                        } else  {
+                            if cspec.Image != origContainerImages[i] {
+                                t.Errorf("Not rewrite image rewritten (%s): %s", tt.test, cspec.Image)
+                            }
+                        }
+                    }
+
+                } else {
+                    if err == nil {
+                        t.Errorf("expected failed admission: %s", tt.test)
+                    }
+                }
+                if tt.wantErr {
+                    if err == nil {
+                        t.Errorf("expected error making admission request: %v", err)
+                    }
+                    return
+                }
+                if err != nil {
+                    t.Errorf("%s: failed to admit: %v", tt.test, err)
+                    return
+                }
+            }
+		}()
 	}
 }

@@ -137,7 +137,27 @@ func (a *imagePolicyWebhook) Admit(attributes admission.Attributes) (err error) 
 	if err := a.admitPod(attributes, &imageReview); err != nil {
 		return admission.NewForbidden(attributes, err)
 	}
-	return nil
+
+    // Rewrite container images
+    base := 0
+    if len(imageReview.Status.ContainerRewrites) == len(containers) {
+        for i := 0; i < len(pod.Spec.Containers); i++ {
+             glog.V(2).Infof("Container rewrites: %s", imageReview.Status.ContainerRewrites[base+i]. Image)
+            if imageReview.Status.ContainerRewrites[base+i].Image != "" {
+                pod.Spec.Containers[i].Image = imageReview.Status.ContainerRewrites[base+i].Image
+            }
+        }
+
+        base += len(pod.Spec.Containers)
+        for i := 0; i < len(pod.Spec.InitContainers); i++ {
+             glog.V(2).Infof("Container rewrites: %s", imageReview.Status.ContainerRewrites[base+i]. Image)
+            if imageReview.Status.ContainerRewrites[base+i].Image != "" {
+                pod.Spec.InitContainers[i].Image = imageReview.Status.ContainerRewrites[base+i].Image
+            }
+        }
+    }
+
+    return nil
 }
 
 func (a *imagePolicyWebhook) admitPod(attributes admission.Attributes, review *v1alpha1.ImageReview) error {
